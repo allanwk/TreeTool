@@ -2,10 +2,49 @@ import numpy as np
 import csv
 from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtGui import QPainter, QColor
-from PyQt5.QtWidgets import QApplication, QMainWindow, QListWidgetItem
+from PyQt5.QtWidgets import QApplication, QMainWindow, QListWidgetItem, QMenu, QAction, QLineEdit, QPushButton
 import sys
 import csv
 import codecs
+
+class ListWidget(QtWidgets.QListWidget):
+    def __init__(self, *args, **kwargs):
+        super(ListWidget, self).__init__(*args, **kwargs)
+    
+    def setPerson(self, person):
+        self.person = person
+        
+class PersonForm(QMainWindow):
+    def __init__(self, parent=None):
+        super(PersonForm, self).__init__(parent)
+        self.setGeometry(200, 200, 200, 200)
+        self.initUI()
+    
+    def setPerson(self, origin_person, person_type):
+        self.origin_person = origin_person
+        self.person_type = person_type
+
+    def initUI(self):
+        self.nameTxtBox = QLineEdit(self)
+        self.nameTxtBox.move(20,20)
+        self.nameTxtBox.resize(140,20)
+
+        self.submitBtn = QPushButton("Concluído", self)
+        self.submitBtn.clicked.connect(self.handle_click)
+        self.submitBtn.move(20, 60)
+
+    def handle_click(self):
+        name = self.nameTxtBox.text()
+        p = Person(name)
+        if self.person_type == 'sibling':
+            self.parent().addSibling(self.origin_person, p)
+        elif self.person_type == 'partner':
+            self.parent().addPartner(self.origin_person, p)
+        elif self.person_type == 'expartner':
+            self.parent().addExPartner(self.origin_person, p)
+        elif self.person_type == 'parent':
+            self.parent().addParent(self.origin_person, p)
+        self.close()
 
 class Window(QMainWindow):
     def __init__(self):
@@ -19,16 +58,101 @@ class Window(QMainWindow):
         self.level_heigth = 50
         self.spacing = 20
         self.people = []
+        self.focus_person = lucas
 
     def show_people(self, people):
         self.people = people
         for person in people:
             y = int(person.level * (self.level_heigth + self.spacing))
             x = int(400 + (person.x * (self.person_width + self.spacing)))
-            self.displayed_people.append(QtWidgets.QListWidget(self))
+            self.displayed_people.append(ListWidget(self))
+            self.displayed_people[-1].setPerson(person)
+            self.displayed_people[-1].installEventFilter(self)
             self.displayed_people[-1].addItem(QListWidgetItem(person.name))
             self.displayed_people[-1].setGeometry(QtCore.QRect(x, y, self.person_width, self.level_heigth))
             self.displayed_people[-1].show()
+
+    def eventFilter(self, source, event):
+        if event.type() == QtCore.QEvent.ContextMenu:
+            self.menu = QMenu(self)
+            addSiblingAction = QAction('Adicionar irmão', self)
+            addSiblingAction.triggered.connect(lambda: self.showSiblingForm(event, source))
+            addPartnerAction = QAction('Adicionar cônjuge atual', self)
+            addPartnerAction.triggered.connect(lambda: self.showPartnerForm(event, source))
+            addExPartnerAction = QAction('Adicionar cônjuge divorciado', self)
+            addExPartnerAction.triggered.connect(lambda: self.showExPartnerForm(event, source))
+            addParentAction = QAction('Adicionar pai/mãe', self)
+            addParentAction.triggered.connect(lambda: self.showParentForm(event, source))
+            self.menu.addAction(addSiblingAction)
+            self.menu.addAction(addPartnerAction)
+            self.menu.addAction(addExPartnerAction)
+            self.menu.addAction(addParentAction)
+            self.menu.popup(QtGui.QCursor.pos())
+        return super().eventFilter(source, event)
+
+    def showSiblingForm(self, event, source):
+        self.form = PersonForm(self)
+        self.form.setPerson(source.person, 'sibling')
+        self.form.show()
+
+    def addSibling(self, person, sibling):
+        person.parent_relationship.children.append(sibling)
+        sibling.level = person.level
+        sibling.parent_relationship = person.parent_relationship
+        self.update_view()
+        
+    def showPartnerForm(self, event, source):
+        self.form = PersonForm(self)
+        self.form.setPerson(source.person, 'partner')
+        self.form.show()
+    
+    def addPartner(self, person, partner):
+        establish_relationship(person, partner)
+        partner.level = person.level
+        set_active_relationship(person, partner)
+        self.update_view()
+    
+    def showExPartnerForm(self, event, source):
+        self.form = PersonForm(self)
+        self.form.setPerson(source.person, 'expartner')
+        self.form.show()
+    
+    def addExPartner(self, person, partner):
+        rel = establish_relationship(person, partner)
+        partner.level = person.level
+        rel.divorced = True
+        self.update_view()
+
+    def showParentForm(self, event, source):
+        self.form = PersonForm(self)
+        self.form.setPerson(source.person, 'parent')
+        self.form.show()
+    
+    def addParent(self, person, parent):
+        if len(person.parent_relationship.partners) == 0: 
+            unknown = Person('Desconhecido')
+            rel = establish_relationship(parent, unknown)
+            for sibling in person.parent_relationship.children:
+                rel.children.append(sibling)
+                sibling.parent_relationship = rel
+            generate_tree_info(parent, clear_list=True)
+        
+        else:
+            for partner in person.parent_relationship.partners:
+                if partner.name == 'Desconhecido':
+                    partner.name = parent.name
+        self.update_view()
+
+
+    def clear_tree(self):
+        for widget in self.displayed_people:
+            widget.setParent(None)
+        self.displayed_people.clear()
+
+    def update_view(self):
+        generate_positions(self.focus_person, lowest_level[0])
+        self.clear_tree()
+        self.show_people(people_to_show)
 
     def convert_x(self, x):
         return int(400 + (x * (self.person_width + self.spacing)))
@@ -108,6 +232,7 @@ def establish_relationship(p1, p2):
     r = Partnership([p1, p2])
     p1.partners.append(r)
     p2.partners.append(r)
+    return r
     
 def set_active_relationship(p1, p2):
     print("p1", p1.name)
@@ -135,6 +260,7 @@ def add_children(p1, p2, children):
         child.parent_relationship = rel
 
 highest = [None, float('inf')]
+lowest_level = [-1]
 people_ls = []
 def count_people(person, visited=[], count=0, level=0, checkHighest=False, clear_list=False):
     if person.name not in visited:
@@ -148,6 +274,8 @@ def count_people(person, visited=[], count=0, level=0, checkHighest=False, clear
         if level < highest[1] and checkHighest:
             highest[0] = person
             highest[1] = level
+        if level > lowest_level[0]:
+            lowest_level[0] = level
         if person.parent_relationship != None:
             for parent in person.parent_relationship.partners:
                 if parent.name not in visited:
@@ -160,6 +288,13 @@ def count_people(person, visited=[], count=0, level=0, checkHighest=False, clear
                 if child.name not in visited:
                     count = count_people(child, visited, count, level+1, checkHighest)
     return count
+
+def generate_tree_info(person, highest = [], lowest_level = [], checkHighest=False, clear_list=False):
+    highest.clear()
+    highest = [None, float('inf')]
+    people_ls.clear()
+    lowest_level = [-1]
+    return count_people(person, checkHighest=checkHighest, clear_list=clear_list, visited=[])
 
 people_per_level = {}
 def get_adjacency(person, person_adjacency, visited=[]):
@@ -187,21 +322,27 @@ def get_adjacency(person, person_adjacency, visited=[]):
 
 usedx = {}
 people_to_show = []
+ancestors = []
 def put(person):
+    ancestors.append(person.name)
     people_to_show.append(person)
     print("Starting at", person.name)
     if person.level not in usedx:
         usedx[person.level] = []
     if person.level-1 not in usedx:
         usedx[person.level-1] = []
+    print(usedx)
     if len(person.parent_relationship.partners) != 0:
         people_left = len(person.parent_relationship.partners[0].parent_relationship.children)
+        people_left += len(person.parent_relationship.partners[0].partners) - 1
         for sibling in person.parent_relationship.partners[0].parent_relationship.children:
             if sibling.name != person.parent_relationship.partners[0].name:
                 people_left += len(sibling.partners)
         leftmost = person.x - people_left + 0.5
         leftmost += len(person.parent_relationship.partners[0].partners) - 1
+
         people_right = len(person.parent_relationship.partners[1].parent_relationship.children)
+        people_right += len(person.parent_relationship.partners[1].partners) - 1
         for sibling in person.parent_relationship.partners[1].parent_relationship.children:
             if sibling.name != person.parent_relationship.partners[1].name:
                 people_right += len(sibling.partners)
@@ -209,19 +350,23 @@ def put(person):
         rightmost += len(person.parent_relationship.partners[1].partners) - 1
 
         try:
-            left_dist = leftmost - max([a for a in usedx[person.level-1] if a <= leftmost])
+            left_dist = leftmost - max([a for a in usedx[person.level-1]])
         except:
             left_dist = float('inf')
         try:
-            right_dist = max([a for a in usedx[person.level-1] if a >= rightmost]) - rightmost
+            right_dist = max([a for a in usedx[person.level-1]]) - rightmost
         except:
             right_dist = float('inf')
-        print(left_dist, right_dist)
+        
         offset = 0
         if left_dist < 1:
-            offset = 1 - left_dist
+            offset = people_left - left_dist
+        """
         elif right_dist < 1:
-            offset = -1 + right_dist * (-1)
+            offset = -people_right - right_dist
+        """
+        print(people_left, people_right)
+        print(left_dist, right_dist, offset)
 
         person.parent_relationship.partners[0].x = person.x - 0.5 + offset
         person.parent_relationship.partners[1].x = person.x + 0.5 + offset
@@ -236,6 +381,7 @@ def put(person):
                     people_to_show.append(p)
                     p.x = person.x - (0.5 + counter) + offset
                     counter += 1
+                    usedx[person.level - 1].append(p.x)
         for sibling in parent.parent_relationship.children:
             if sibling.name != parent.name:
                 people_to_show.append(sibling)
@@ -258,6 +404,7 @@ def put(person):
                     people_to_show.append(p)
                     p.x = person.x + (0.5 + counter) + offset
                     counter += 1
+                    usedx[person.level - 1].append(p.x)
         for sibling in parent.parent_relationship.children:
             if sibling.name != parent.name:
                 people_to_show.append(sibling)
@@ -273,6 +420,15 @@ def put(person):
                             counter += 1
         for parent in person.parent_relationship.partners:
             put(parent)
+
+def generate_positions(focus_person, n_levels):
+    focus_person.x = 0
+    usedx.clear()
+    ancestors.clear()
+    people_to_show.clear()
+    put(focus_person)
+    for i in range(1, n_levels + 1):
+        rearrange(i)
 
 def rearrange(level):
     repositioned = []
@@ -318,9 +474,8 @@ def rearrange(level):
             if len(p.partners) > 1:
                 for rel in p.partners:
                     for partner in rel.partners:
-                        if partner.name != p.name and partner.x < p.x:
+                        if partner.name != p.name and partner.x < p.x and p.name not in ancestors:
                             partner.x += offset
-
 
         else:
             print("skipping", p.name, ' no parents')
@@ -389,50 +544,28 @@ jack = Person('Jack')
 ruby = Person('Ruby')
 john = Person('John')
 lucas = Person('Lucas')
-manuel = Person('Manuel')
+
 establish_relationship(allan, livia)
-establish_relationship(amelie, Person('Joe'))
-rose = Person('Rose')
-establish_relationship(jack, rose)
-add_children(jack, rose, Person("Joao"))
 establish_relationship(amelie, jack)
+establish_relationship(amelie, Person('Joe'))
 set_active_relationship(amelie, jack)
 establish_relationship(john, ruby)
-establish_relationship(manuel, Person("Jane"))
+establish_relationship(john, Person('Jane'))
+set_active_relationship(john, ruby)
+
 add_children(allan, livia, amelie)
-add_children(allan, livia, manuel)
-add_children(allan, livia, Person("Claudia"))
-james = Person('James')
-establish_relationship(james, Person('Janice'))
-add_children(ruby, john, james)
 add_children(ruby, john, jack)
 add_children(amelie, jack, lucas)
-add_children(amelie, jack, Person('jkj'))
-add_children(ruby, john, Person('Joaquim'))
-daggie = Person('Daggie')
-luiz = Person('Luiz')
-g = Person('Gláucia')
-p = Person('Paulo')
-o = Person('Christel')
-h =Person('Herbert')
-establish_relationship(h,o)
-add_children(h,o,daggie)
-establish_relationship(g, p)
-add_children(g, p, livia)
-establish_relationship(daggie, luiz)
-add_children(daggie, luiz, allan)
-fred = Person('Frederico')
-lili = Person('Lili')
-establish_relationship(fred, lili)
-add_children(fred, lili, luiz)
 
 
-n_people = count_people(lucas, checkHighest=True)
-n_people = count_people(highest[0], visited=[], clear_list=True)
-put(lucas)
 
-for i in range(1,7):
-    rearrange(i)
+generate_tree_info(lucas, checkHighest=True)
+generate_tree_info(highest[0], clear_list=True)
+print("level", lowest_level[0])
+#n_people = count_people(lucas, checkHighest=True)
+#n_people = count_people(highest[0], visited=[], clear_list=True)
+generate_positions(lucas, lowest_level[0])
+
 
 generation_above = [p for p in people_to_show if p.level == lucas.level - 1]
 visited = set()
