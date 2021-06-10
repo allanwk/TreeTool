@@ -20,8 +20,9 @@ class PersonForm(QMainWindow):
         self.setGeometry(200, 200, 200, 200)
         self.initUI()
     
-    def setPerson(self, origin_person, person_type):
+    def setPerson(self, origin_person, person_type, second_parent_name=None):
         self.origin_person = origin_person
+        self.second_parent_name = second_parent_name
         self.person_type = person_type
         if person_type == 'edit':
             self.nameTxtBox.setText(origin_person.name)
@@ -53,6 +54,8 @@ class PersonForm(QMainWindow):
         elif self.person_type == 'edit':
             self.origin_person.name = name
             self.parent().update_view()
+        elif self.person_type == 'child':
+            self.parent().addChild(self.origin_person, self.second_parent_name, p)
         self.close()
 
     def keyPressEvent(self, event):
@@ -94,6 +97,8 @@ class Window(QMainWindow):
             editAction.triggered.connect(lambda: self.showEditForm(event, source))
             deleteAction = QAction("Excluir", self)
             deleteAction.triggered.connect(lambda: self.deletePerson(event, source))
+            addChildAction = QAction("Adicionar filho", self)
+            addChildAction.triggered.connect(lambda: self.showParentOptions(event, source))
             addSiblingAction = QAction('Adicionar irmão', self)
             addSiblingAction.triggered.connect(lambda: self.showSiblingForm(event, source))
             addPartnerAction = QAction('Adicionar cônjuge atual', self)
@@ -104,6 +109,7 @@ class Window(QMainWindow):
             addParentAction.triggered.connect(lambda: self.showParentForm(event, source))
             self.menu.addAction(editAction)
             self.menu.addAction(deleteAction)
+            self.menu.addAction(addChildAction)
             self.menu.addAction(addSiblingAction)
             self.menu.addAction(addPartnerAction)
             self.menu.addAction(addExPartnerAction)
@@ -143,7 +149,39 @@ class Window(QMainWindow):
                         
             if update:
                 self.update_view()
-        
+    
+    def showParentOptions(self, event, source):
+        if len(source.person.partners) > 1:
+            self.submenu = QMenu(self)
+            actions = []
+            for rel in source.person.partners:
+                for partner in rel.partners:
+                    if partner.name != source.person.name:
+                        actions.append(QAction(partner.name, self))
+            for action in actions:
+                action.triggered.connect(lambda: self.showChildForm(source.person, action.text()))
+                self.submenu.addAction(action)
+            self.submenu.setTitle("Filho com:")
+            self.submenu.popup(QtGui.QCursor.pos())
+        elif len(source.person.partners) == 1:
+            for partner in source.person.partners[0].partners:
+                if partner.name != source.person.name:
+                    self.showChildForm(source.person, partner.name)
+    
+    def showChildForm(self, person, second_parent_name):
+        self.form = PersonForm(self)
+        self.form.setPerson(person, 'child', second_parent_name)
+        self.form.show()
+
+    def addChild(self, person, second_parent_name, child):
+        print("addchild", person.name, second_parent_name)
+        for rel in person.partners:
+            for partner in rel.partners:
+                if partner.name == second_parent_name:
+                    add_children(person, partner, child)
+                    child.level = person.level + 1
+        self.update_view()
+
     def addSibling(self, person, sibling):
         person.parent_relationship.children.append(sibling)
         sibling.level = person.level
