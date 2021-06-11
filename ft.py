@@ -20,9 +20,9 @@ class PersonForm(QMainWindow):
         self.setGeometry(200, 200, 200, 200)
         self.initUI()
     
-    def setPerson(self, origin_person, person_type, second_parent_name=None):
+    def setPerson(self, origin_person, person_type, second_parent_id=None):
         self.origin_person = origin_person
-        self.second_parent_name = second_parent_name
+        self.second_parent_id = second_parent_id
         self.person_type = person_type
         if person_type == 'edit':
             self.nameTxtBox.setText(origin_person.name)
@@ -55,11 +55,10 @@ class PersonForm(QMainWindow):
             self.origin_person.name = name
             self.parent().update_view()
         elif self.person_type == 'child':
-            self.parent().addChild(self.origin_person, self.second_parent_name, p)
+            self.parent().addChild(self.origin_person, self.second_parent_id, p)
         self.close()
 
     def keyPressEvent(self, event):
-        
         if event.key() == QtCore.Qt.Key_Enter or event.key() == QtCore.Qt.Key_Return:
             self.handle_click()
 
@@ -75,10 +74,12 @@ class Window(QMainWindow):
         self.level_heigth = 50
         self.spacing = 20
         self.people = []
-        self.focus_person = lucas
+        self.shown_ids = []
+        self.focus_person = jim
 
     def show_people(self, people):
         self.people = people
+        self.shown_ids = [p.id for p in self.people]
         for person in people:
             y = int(person.level * (self.level_heigth + self.spacing))
             x = int(400 + (person.x * (self.person_width + self.spacing)))
@@ -107,6 +108,8 @@ class Window(QMainWindow):
             addExPartnerAction.triggered.connect(lambda: self.showExPartnerForm(event, source))
             addParentAction = QAction('Adicionar pai/mãe', self)
             addParentAction.triggered.connect(lambda: self.showParentForm(event, source))
+            setAsFocusAction = QAction('Mostrar árvore com foco nesta pessoa', self)
+            setAsFocusAction.triggered.connect(lambda: self.changeFocus(event, source))
             self.menu.addAction(editAction)
             self.menu.addAction(deleteAction)
             self.menu.addAction(addChildAction)
@@ -114,8 +117,16 @@ class Window(QMainWindow):
             self.menu.addAction(addPartnerAction)
             self.menu.addAction(addExPartnerAction)
             self.menu.addAction(addParentAction)
+            self.menu.addAction(setAsFocusAction)
             self.menu.popup(QtGui.QCursor.pos())
         return super().eventFilter(source, event)
+
+    def changeFocus(self, event, source):
+        self.focus_person = source.person
+        generate_tree_info(self.focus_person, checkHighest=True)
+        generate_tree_info(highest[0], clear_list=True)
+        self.update_view()
+        self.update()
 
     def showEditForm(self, event, source):
         self.form = PersonForm(self)
@@ -156,7 +167,7 @@ class Window(QMainWindow):
             actions = []
             for rel in source.person.partners:
                 for partner in rel.partners:
-                    if partner.name != source.person.name:
+                    if partner.id != source.person.id:
                         actions.append(QAction(partner.name, self))
             for action in actions:
                 action.triggered.connect(lambda: self.showChildForm(source.person, action.text()))
@@ -165,21 +176,21 @@ class Window(QMainWindow):
             self.submenu.popup(QtGui.QCursor.pos())
         elif len(source.person.partners) == 1:
             for partner in source.person.partners[0].partners:
-                if partner.name != source.person.name:
-                    self.showChildForm(source.person, partner.name)
+                if partner.id != source.person.id:
+                    self.showChildForm(source.person, partner.id)
     
-    def showChildForm(self, person, second_parent_name):
+    def showChildForm(self, person, second_parent_id):
         self.form = PersonForm(self)
-        self.form.setPerson(person, 'child', second_parent_name)
+        self.form.setPerson(person, 'child', second_parent_id)
         self.form.show()
 
-    def addChild(self, person, second_parent_name, child):
-        print("addchild", person.name, second_parent_name)
+    def addChild(self, person, second_parent_id, child):
         for rel in person.partners:
             for partner in rel.partners:
-                if partner.name == second_parent_name:
+                if partner.id == second_parent_id:
                     add_children(person, partner, child)
                     child.level = person.level + 1
+                    generate_tree_info(highest[0], clear_list=True)
         self.update_view()
 
     def addSibling(self, person, sibling):
@@ -252,7 +263,7 @@ class Window(QMainWindow):
             y1 = int(person.level * (self.level_heigth + self.spacing))
             for rel in person.partners:                    
                 for partner in rel.partners:
-                    if partner.name != person.name:
+                    if partner.id != person.id and partner.id in self.shown_ids:
                         x2 = int(400 + (partner.x * (self.person_width + self.spacing)))
                         y2 = int(partner.level * (self.level_heigth + self.spacing))
                         if rel.divorced:
@@ -264,15 +275,20 @@ class Window(QMainWindow):
                             relx = self.person_width/2 + (x1 + x2)/2
                             qp.drawLine(relx, y1+self.level_heigth/2, relx, y1+self.level_heigth+self.spacing/2)
 
-            if len(person.parent_relationship.partners) > 0:
+            if len(person.parent_relationship.partners) > 0 and person.parent_relationship.partners[0].id in self.shown_ids:
                 qp.drawLine(x1+self.person_width/2, y1, x1 + self.person_width/2, y1-self.spacing/2)
             if len(person.parent_relationship.children) > 1:
-                siblings = person.parent_relationship.children.copy()
-                siblings.sort(key = lambda p: p.x)
-                if person.x == siblings[0].x:
-                    leftx = self.convert_x(siblings[0].x) + self.person_width/2
-                    rightx = self.convert_x(siblings[-1].x) + self.person_width/2
-                    qp.drawLine(leftx, y1-self.spacing/2, rightx, y1-self.spacing/2)
+                shown_siblings = 0
+                for sib in person.parent_relationship.children:
+                    if sib.id in self.shown_ids:
+                        shown_siblings += 1
+                if shown_siblings > 1:
+                    siblings = person.parent_relationship.children.copy()
+                    siblings.sort(key = lambda p: p.x)
+                    if person.x == siblings[0].x:
+                        leftx = self.convert_x(siblings[0].x) + self.person_width/2
+                        rightx = self.convert_x(siblings[-1].x) + self.person_width/2
+                        qp.drawLine(leftx, y1-self.spacing/2, rightx, y1-self.spacing/2)
                 """
                 if person.x == siblings[0].x:
                     qp.drawLine(x1+self.person_width/2, y1-self.spacing/2, x1 + self.person_width, y1-self.spacing/2)
@@ -297,6 +313,7 @@ class Person:
         self.id = None
         self.level = None
         self.x = 0
+        self.groupped = False
 
     def __str__(self):
         return "Person: {}, level {}, x={}, {}".format(self.name, self.level, self.x, self.partners)
@@ -313,7 +330,9 @@ class Partnership:
         self.divorced = False
     
     def __str__(self):
-        return "Relationship between {} and {}\nChildren: {}".format(self.partners[0].name, self.partners[1].name, self.children)
+        if len(self.partners) > 0:
+            return "Relationship between {} and {}\nChildren: {}".format(self.partners[0].name, self.partners[1].name, self.children)
+        return "Empty relationship with children {}".format(self.children)
 
 def establish_relationship(p1, p2):
     r = Partnership([p1, p2])
@@ -367,6 +386,7 @@ def count_people(person, visited=[], count=0, level=0, checkHighest=False, clear
             highest[0] = person
             highest[1] = level
         if level > lowest_level[0]:
+            print("Found lowest level", level)
             lowest_level[0] = level
         if person.parent_relationship != None:
             for parent in person.parent_relationship.partners:
@@ -386,6 +406,7 @@ def generate_tree_info(person, highest = [], lowest_level = [], checkHighest=Fal
     highest = [None, float('inf')]
     people_ls.clear()
     lowest_level = [-1]
+    print("lowest level", lowest_level[0])
     return count_people(person, checkHighest=checkHighest, clear_list=clear_list, visited=[])
 
 people_per_level = {}
@@ -415,9 +436,9 @@ def get_adjacency(person, person_adjacency, visited=[]):
 usedx = {}
 people_to_show = []
 ancestors = []
-def put(person, focus_person=None):
-    ancestors.append(person.name)
-    if person.name != focus_person:
+def put(person, focus_person_id=None):
+    ancestors.append(person.id)
+    if person.id != focus_person_id:
         people_to_show.append(person)
     print("Starting at", person.name)
     if person.level not in usedx:
@@ -431,7 +452,7 @@ def put(person, focus_person=None):
         people_left = len(person.parent_relationship.partners[0].parent_relationship.children)
         people_left += len(person.parent_relationship.partners[0].partners) - 1
         for sibling in person.parent_relationship.partners[0].parent_relationship.children:
-            if sibling.name != person.parent_relationship.partners[0].name:
+            if sibling.id != person.parent_relationship.partners[0].id:
                 people_left += len(sibling.partners)
         leftmost = person.x - people_left + 0.5
         leftmost += len(person.parent_relationship.partners[0].partners) - 1
@@ -439,7 +460,7 @@ def put(person, focus_person=None):
         people_right = len(person.parent_relationship.partners[1].parent_relationship.children)
         people_right += len(person.parent_relationship.partners[1].partners) - 1
         for sibling in person.parent_relationship.partners[1].parent_relationship.children:
-            if sibling.name != person.parent_relationship.partners[1].name:
+            if sibling.id != person.parent_relationship.partners[1].id:
                 people_right += len(sibling.partners)
         rightmost = person.x + people_right + 0.5
         rightmost += len(person.parent_relationship.partners[1].partners) - 1
@@ -474,7 +495,7 @@ def put(person, focus_person=None):
         #Divórcios
         for rel in parent.partners:
             for p in rel.partners:
-                if p.name != parent.name and p.name != person.parent_relationship.partners[1].name:
+                if p.id != parent.id and p.id != person.parent_relationship.partners[1].id:
                     print(p.name, 'parent[0]')
                     people_to_show.append(p)
                     p.x = person.x - (0.5 + counter) + offset
@@ -482,14 +503,14 @@ def put(person, focus_person=None):
                     usedx[person.level - 1].append(p.x)
         #Tios e conjuges
         for sibling in parent.parent_relationship.children:
-            if sibling.name != parent.name:
+            if sibling.id != parent.id:
                 people_to_show.append(sibling)
                 sibling.x = person.x - (0.5 + counter) + offset
                 usedx[person.level - 1].append(sibling.x)
                 counter += 1
                 for rel in sibling.partners:
                     for p in rel.partners:
-                        if p.name != sibling.name:
+                        if p.id != sibling.id:
                             people_to_show.append(p)
                             p.x = person.x - (0.5 + counter) + offset
                             usedx[person.level - 1].append(p.x)
@@ -498,21 +519,21 @@ def put(person, focus_person=None):
         parent = person.parent_relationship.partners[1]
         for rel in parent.partners:
             for p in rel.partners:
-                if p.name != parent.name and p.name != person.parent_relationship.partners[0].name:
+                if p.id != parent.id and p.id != person.parent_relationship.partners[0].id:
                     print(p.name, 'parent[1]')
                     people_to_show.append(p)
                     p.x = person.x + (0.5 + counter) + offset
                     counter += 1
                     usedx[person.level - 1].append(p.x)
         for sibling in parent.parent_relationship.children:
-            if sibling.name != parent.name:
+            if sibling.id != parent.id:
                 people_to_show.append(sibling)
                 sibling.x = person.x + (0.5 + counter) + offset
                 usedx[person.level - 1].append(sibling.x)
                 counter += 1
                 for rel in sibling.partners:
                     for p in rel.partners:
-                        if p.name != sibling.name:
+                        if p.id != sibling.id:
                             people_to_show.append(p)
                             p.x = person.x + (0.5 + counter) + offset
                             usedx[person.level - 1].append(p.x)
@@ -525,42 +546,54 @@ def generate_positions(focus_person, n_levels):
     usedx.clear()
     ancestors.clear()
     people_to_show.clear()
-    put(focus_person, focus_person.name)
-    generation_above = [p for p in people_to_show if p.level == focus_person.level - 1]
-    generation_above.sort(key=lambda p: p.x)
-    visited = []
-    for person in generation_above:
-        for rel in person.partners: 
-            if rel not in visited:
-                visited.append(rel)
-                propagate_down(rel)
-    
+    put(focus_person, focus_person.id)
+    if len(focus_person.parent_relationship.partners) > 0:
+        generation_above = [p for p in people_to_show if p.level == focus_person.level - 1]
+        generation_above.sort(key=lambda p: p.x)
+        visited = []
+        for person in generation_above:
+            for rel in person.partners: 
+                if rel not in visited and rel.partners[0] in people_to_show and rel.partners[1] in people_to_show:
+                    visited.append(rel)
+                    focus_rel = False
+                    for child in rel.children:
+                        if child.id == focus_person.id:
+                            focus_rel = True
+                            break
+                    propagate_down(rel, focus_rel)
+    else:
+        propagate_down(focus_person.parent_relationship, True)
+        
     for i in range(1, n_levels+1):
-        rearrange(i, focus_person.level)
-    
+        rearrange(i, focus_person.level, focus_person)    
     
 
-def propagate_down(rel):
+def propagate_down(rel, activate_recursion=False):
     if len(rel.children) > 0:
         print('prop', rel)
-        if rel.partners[0].level not in usedx:
-            usedx[rel.partners[0].level] = []
-        if rel.partners[0].level+1 not in usedx:
-            usedx[rel.partners[0].level+1] = []
+        if len(rel.partners) > 0:
+            parent_level = rel.partners[0].level
+            targetx = min(rel.partners[0].x, rel.partners[1].x)
+        else:
+            parent_level = rel.children[0].level - 1
+            targetx = 0
+        if parent_level not in usedx:
+            usedx[parent_level] = []
+        if parent_level+1 not in usedx:
+            usedx[parent_level+1] = []
 
-        relx = (rel.partners[0].x + rel.partners[1].x)/2
-        print('relx', relx)
+        
         people = 0
         for child in rel.children:
             people += 1
             for relationship in child.partners:
                 people += 1
         
-        leftmost = relx - people + 1
+        leftmost = targetx - people + 1
         print(people, leftmost)
 
         try:
-            left_dist = leftmost - max([a for a in usedx[rel.partners[0].level+1]])
+            left_dist = leftmost - max([a for a in usedx[parent_level+1]])
         except:
             left_dist = float('inf')
         
@@ -575,27 +608,37 @@ def propagate_down(rel):
         counter = 0
         for child in rel.children:
             people_to_show.append(child)
-            child.x = relx - counter + offset
+            child.x = targetx - counter + offset
             counter += 1
-            usedx[rel.partners[0].level + 1].append(child.x)
+            usedx[parent_level + 1].append(child.x)
+            print(child.name, child.x)
             for relationship in child.partners:
                 for partner in relationship.partners:
-                    if partner.name != child.name:
+                    if partner.id != child.id:
                         people_to_show.append(partner)
-                        partner.x = relx - counter + offset
+                        partner.x = targetx - counter + offset
                         counter += 1
-                        usedx[rel.partners[0].level + 1].append(partner.x)
+                        usedx[parent_level + 1].append(partner.x)
+                        print(partner.name, partner.x)
 
-def rearrange(level, key_level):
+        if activate_recursion:
+            for child in sorted(rel.children, key=lambda c: c.x):
+                for relationship in sorted(child.partners, key=lambda r: (r.partners[0].x + r.partners[1].x)/2):
+                    propagate_down(relationship, activate_recursion)
+
+def rearrange(level, key_level, focus_person):
     print("rearranging level", level)
     repositioned = []
     people = [p for p in people_to_show if p.level == level]
     people.sort(key = lambda p: p.x)
     for p in people:
         if len(p.parent_relationship.partners) != 0:
+            if p.parent_relationship.partners[0] not in people_to_show or p.parent_relationship.partners[1] not in people_to_show:
+                print("skipping", p.name, ' no parents shown')
+                continue
             #check if it is the rightmost sibling
 
-            siblings = p.parent_relationship.children.copy()
+            siblings = [sib for sib in p.parent_relationship.children if sib in people_to_show]
             siblings.sort(key = lambda p: p.x)
             siblings_x = 0
             for sib in siblings:
@@ -605,34 +648,40 @@ def rearrange(level, key_level):
             if p.x != siblings[-1].x:
                 print("skipping", p.name, ' not rightmost sibling')
                 continue
-            repositioned.append(p.name)
+            repositioned.append(p.id)
             expected_x = (p.parent_relationship.partners[0].x + p.parent_relationship.partners[1].x)/2
+            
+            #Se a pessoa em foco tiver mais de um relacinamento,
+            #os filhos de divórcios devem ser posicionados abaixo do pai
+            #mais a esquerda
+            if p.level >= focus_person.level:
+                if p.parent_relationship.divorced:
+                    expected_x = min(p.parent_relationship.partners[0].x, p.parent_relationship.partners[1].x)
             
             offset = expected_x - siblings_x
             print(p.name, p.x, p.parent_relationship.partners[0].x, p.parent_relationship.partners[1].x, offset)
             
             if offset < 0:
                 print("triggering recursion from ", p.name, offset)
-                offset_above(p.parent_relationship.partners[1], -2 * offset, level-1, ancestors, p.name in ancestors)
+                offset_above(p.parent_relationship.partners[1], -2 * offset, level-1, ancestors, p.id in ancestors)
                 continue
             for p2 in people:
-                if p2.name != p.name:
+                if p2.id != p.id:
                     if p2.x >= p.x:
                         p2.x += offset
             
             for sibling in p.parent_relationship.children:
                 sibling.x += offset
-                if sibling.name != p.name:
+                if sibling.id != p.id:
                     for rel in sibling.partners:
                         for partner in rel.partners:
-                            if partner.name != sibling.name and partner.name not in repositioned:
+                            if partner.id != sibling.id and partner.id not in repositioned:
                                 partner.x += offset
             
             if len(p.partners) > 1 or p.level >= key_level:
                 for rel in p.partners:
                     for partner in rel.partners:
-                        print('trying to offset', partner.name, partner.x, p.x)
-                        if partner.name != p.name and partner.x < p.x:
+                        if partner.id != p.id and partner.x < p.x:
                             partner.x += offset
                             
 
@@ -640,24 +689,24 @@ def rearrange(level, key_level):
             print("skipping", p.name, ' no parents')
 
 def offset_subtree(person, caller_rel, offset, visited=[]):
-    print("offsetsubtree", person, offset, visited)
-    if person.name not in visited:
+    if person.id not in visited and person in people_to_show:
+        print("offsetsubtree", person, offset, visited)
         person.x += offset
-        visited.append(person.name)
+        visited.append(person.id)
         if person.parent_relationship != None:
             for parent in person.parent_relationship.partners:
-                if parent.name not in visited:
+                if parent.id not in visited:
                     offset_subtree(parent, caller_rel, offset, visited)
             for sibling in person.parent_relationship.children:
-                if sibling.name != person.name:
+                if sibling.id != person.id:
                     offset_subtree(sibling, caller_rel, offset, visited)
         for relationship in person.partners:
             for p in relationship.partners:
-                if p.name not in visited:
+                if p.id not in visited:
                     offset_subtree(p, caller_rel, offset, visited)
             if relationship is not caller_rel:
                 for child in relationship.children:
-                    if child.name not in visited:
+                    if child.id not in visited:
                         offset_subtree(child, caller_rel, offset, visited)
 
 def offset_above(p, offset, level, ancestors, called_by_ancestor=True):
@@ -709,6 +758,7 @@ def load_tree():
                                 add_children(rel.partners[0], rel.partners[1], people[j])
     return people[0]
 
+
 #Test tree
 allan = Person('Allan')
 livia = Person('Livia')
@@ -742,15 +792,16 @@ add_children(amelie, jack, lucas)
 add_children(amelie, joe, Person('asfs'))
 
 
-generate_tree_info(lucas, checkHighest=True)
+generate_tree_info(amelie, checkHighest=True)
 generate_tree_info(highest[0], clear_list=True)
 print("level", lowest_level[0])
 #n_people = count_people(lucas, checkHighest=True)
 #n_people = count_people(highest[0], visited=[], clear_list=True)
-generate_positions(lucas, lowest_level[0])
+generate_positions(amelie, lowest_level[0])
 
 app = QApplication(sys.argv)
 win = Window()
 win.show()
+win.focus_person = amelie
 win.show_people(people_to_show)
 sys.exit(app.exec_())
