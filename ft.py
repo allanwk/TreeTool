@@ -266,13 +266,24 @@ class Window(QMainWindow):
                     if partner.id != person.id and partner.id in self.shown_ids:
                         x2 = int(400 + (partner.x * (self.person_width + self.spacing)))
                         y2 = int(partner.level * (self.level_heigth + self.spacing))
+
+                        #Representação dos relacionamentos
                         if rel.divorced:
                             qp.setPen(QColor(255,0,0))
-                        qp.drawLine(x1+self.person_width/2, y1+self.level_heigth/2, x2+self.person_width/2, y2+self.level_heigth/2)
-                        if rel.divorced:
+                            qp.drawLine(x1+self.person_width/2, y1+self.level_heigth/3, x2+self.person_width/2, y2+self.level_heigth/3)
                             qp.setPen(QColor(0,0,0))
-                        if len(rel.children) > 0:
-                            relx = self.person_width/2 + (x1 + x2)/2
+                        else:
+                            qp.drawLine(x1+self.person_width/2, y1+self.level_heigth/2, x2+self.person_width/2, y2+self.level_heigth/2)
+                            
+
+                        #Conexão com filhos
+                        if len([child for child in rel.children if child in self.people]) > 0:
+                            if rel.divorced:
+                                for parent in rel.partners:
+                                    if parent.mainDivorceParent:
+                                        relx = self.convert_x(parent.x) + self.person_width/2
+                            else:
+                                relx = self.person_width/2 + (x1 + x2)/2
                             qp.drawLine(relx, y1+self.level_heigth/2, relx, y1+self.level_heigth+self.spacing/2)
 
             if len(person.parent_relationship.partners) > 0 and person.parent_relationship.partners[0].id in self.shown_ids:
@@ -313,7 +324,7 @@ class Person:
         self.id = None
         self.level = None
         self.x = 0
-        self.groupped = False
+        self.mainDivorceParent = False
 
     def __str__(self):
         return "Person: {}, level {}, x={}, {}".format(self.name, self.level, self.x, self.partners)
@@ -654,9 +665,29 @@ def rearrange(level, key_level, focus_person):
             #Se a pessoa em foco tiver mais de um relacinamento,
             #os filhos de divórcios devem ser posicionados abaixo do pai
             #mais a esquerda
-            if p.level >= focus_person.level:
-                if p.parent_relationship.divorced:
-                    expected_x = min(p.parent_relationship.partners[0].x, p.parent_relationship.partners[1].x)
+            
+            if p.parent_relationship.divorced:
+                #Encontrar o pai que não tem relacionamentos ativos mostrados
+                valid = True
+                for parent in p.parent_relationship.partners:
+                    valid = True
+                    for rel in parent.partners:
+                        if not rel.divorced:
+                            for partner in rel.partners:
+                                if partner.id != parent.id and partner in people_to_show:
+                                   valid = False
+                    if valid:
+                        expected_x = parent.x
+                        parent.mainDivorceParent = True
+                        break
+                if not valid:
+                    #Escolher pai mais a esquerda
+                    parents = sorted(p.parent_relationship.partners, key= lambda p: p.x)
+                    parents[0].mainDivorceParent = True
+                    expected_x = parents[0].x
+                    #expected_x = min(p.parent_relationship.partners[0].x, p.parent_relationship.partners[1].x)
+                    
+
             
             offset = expected_x - siblings_x
             print(p.name, p.x, p.parent_relationship.partners[0].x, p.parent_relationship.partners[1].x, offset)
