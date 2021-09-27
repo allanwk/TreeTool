@@ -5,6 +5,7 @@ import sys
 import csv
 from tree_utils import *
 from buchheim import buchheim, apply_offset
+import os
 
 class ListWidget(QtWidgets.QListWidget):
     def __init__(self, *args, **kwargs):
@@ -71,7 +72,7 @@ class PersonForm(QMainWindow):
             self.handle_click()
 
 class Window(QMainWindow):
-    def __init__(self, rels):
+    def __init__(self):
         super(Window, self).__init__()
         self.setGeometry(200,200,800,400)
         self.setWindowTitle("Árvore Genealógica")
@@ -83,12 +84,11 @@ class Window(QMainWindow):
         self.spacing = 20
         self.displayed_people = []
         self.shown_ids = []
-        self.rels = rels
-        self.focus_rel = rels[0]
+        self.save_path = None
+        self.rels = None
+        self.focus_rel = None
         self.init_menubar()
         self.yoffset = self.menubar.frameGeometry().height()
-        self.update_view()
-        
 
     def init_menubar(self):
         self.menubar = self.menuBar()
@@ -109,16 +109,35 @@ class Window(QMainWindow):
         save_menu.addAction(save_as_action)
 
     def open_file(self):
-        pass
+        qfd = QtWidgets.QFileDialog(self)
+        path = qfd.getOpenFileName(self, 'Selecione um arquivo')[0]
+        if path == '':
+            return
+        rels = load_tree(path)
+        self.rels = rels
+        self.focus_rel = rels[0]
+        self.update_view()
+        self.save_path = path
 
     def new_file(self):
-        pass
+        self.focus_rel = None
+        self.rels = None
+        self.update_view()
+        self.save_path = None
 
     def save_file(self):
-        pass
+        save_tree(self.save_path)
 
     def save_as_file(self):
-        pass
+        qfd = QtWidgets.QFileDialog(self)
+        path = qfd.getSaveFileName(self, 'Selecione como')[0]
+        filename = os.path.basename(path)
+        extension = os.path.splitext(path)[1]
+        if ret == qm.Yes:
+            if extension == '':
+                save_tree(path + '.csv')
+            elif extension == '.csv':
+                save_tree(path)
 
     def recursive_show(self, dt):
         if dt in self.displayed_rels:
@@ -169,6 +188,10 @@ class Window(QMainWindow):
 
     def update_view(self):
         self.clear_tree()
+        if self.focus_rel is None:
+            self.update()
+            return
+        
         down = buchheim(self.focus_rel)
         up = buchheim(self.focus_rel, inverse=True)
 
@@ -286,10 +309,10 @@ class Window(QMainWindow):
 
 
 def main():
-    rels = load_tree('tree.csv')
+    
 
     app = QApplication(sys.argv)
-    win = Window(rels)
+    win = Window()
     win.show()
     sys.exit(app.exec_())
 
